@@ -1,0 +1,78 @@
+---
+- name: Install and Configure Apache Cassandra
+  hosts: all
+  become: yes
+  vars:
+    cassandra_version: "41"  # Change this to the desired Cassandra major version
+    cassandra_series: "41x"  # Adjust based on the version (e.g., "40x" for C* 4.0, "311x" for C* 3.11)
+    cassandra_repo_url: "https://debian.cassandra.apache.org"
+
+  tasks:
+    - name: Check if Java is installed
+      command: java -version
+      register: java_check
+      ignore_errors: yes
+
+    - name: Install Java if not installed
+      ansible.builtin.apt:
+        name: openjdk-11-jdk
+        state: present
+      when: java_check.failed
+
+    - name: Display Java version
+      command: java -version
+      register: java_version_output
+      ignore_errors: yes
+
+    - name: Show Java version output
+      debug:
+        var: java_version_output.stderr_lines
+
+    - name: Create directory for APT keyrings if it does not exist
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download and add Cassandra repository GPG key
+      ansible.builtin.get_url:
+        url: "https://downloads.apache.org/cassandra/KEYS"
+        dest: "/etc/apt/keyrings/apache-cassandra.asc"
+        mode: '0644'
+
+    - name: Add Apache Cassandra repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/apache-cassandra.asc] {{ cassandra_repo_url }} {{ cassandra_series }} main"
+        state: present
+        filename: cassandra.sources.list
+
+    - name: Update package index
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Apache Cassandra
+      ansible.builtin.apt:
+        name: cassandra
+        state: present
+
+    - name: Start Cassandra service
+      ansible.builtin.systemd:
+        name: cassandra
+        state: started
+        enabled: yes
+
+    - name: Monitor Cassandra startup progress
+      command: tail -f /var/log/cassandra/system.log
+      async: 300
+      poll: 5
+      register: tail_output
+      ignore_errors: yes
+
+    - name: Check Cassandra status
+      command: nodetool status
+      register: cassandra_status
+      ignore_errors: yes
+
+    - name: Display Cassandra status
+      debug:
+        var: cassandra_status.stdout_lines
